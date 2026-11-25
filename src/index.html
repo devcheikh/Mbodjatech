@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Sécurité : la page ne charge que ses propres fichiers et ne peut ouvrir
+       aucune connexion réseau (connect-src 'none') : les PDF restent sur l'appareil. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Convertisseur PDF → Excel</title>
+  <meta name="description" content="Convertissez vos PDF en fichiers Excel (.xlsx) directement dans votre navigateur. Aucun fichier n'est envoyé sur Internet.">
+  <link rel="stylesheet" href="css/pdf-excel.css">
+</head>
+<body>
+
+  <!-- ================= EN-TÊTE ================= -->
+  <header class="pe-header">
+    <div class="pe-logo">XL</div>
+    <div>
+      <h1>Convertisseur PDF → Excel</h1>
+      <p>Extraction de tableaux avec leur mise en forme · 100 % local, aucun fichier n'est envoyé sur Internet</p>
+    </div>
+  </header>
+
+  <main class="pe-main">
+
+    <!-- ================= COLONNE GAUCHE : FICHIERS & OPTIONS ================= -->
+    <section>
+
+      <div class="pe-card">
+        <div class="pe-card-head"><h2>1 · Vos fichiers PDF</h2></div>
+        <div class="pe-card-body">
+
+          <div id="drop-zone" class="pe-drop" tabindex="0" role="button"
+               aria-label="Déposer ou choisir des fichiers PDF">
+            <div class="pe-drop-icon">📥</div>
+            <div class="pe-drop-title">Déposez vos PDF ici</div>
+            <div class="pe-drop-sub">ou cliquez pour parcourir · plusieurs fichiers acceptés · 50 Mo max par fichier</div>
+            <input type="file" id="file-input" accept="application/pdf,.pdf" multiple>
+          </div>
+
+          <ul id="file-list" class="pe-files"></ul>
+
+          <div id="progress" class="pe-progress">
+            <div class="pe-progress-bar"><div id="progress-fill" class="pe-progress-fill"></div></div>
+            <div id="progress-text" class="pe-progress-text"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pe-card">
+        <div class="pe-card-head"><h2>2 · Options d'extraction</h2></div>
+        <div class="pe-card-body">
+
+          <div class="pe-field">
+            <label class="pe-label" for="opt-mode">Mode de conversion</label>
+            <select id="opt-mode" class="pe-select">
+              <option value="auto">Automatique — traits du PDF, sinon espaces</option>
+              <option value="grid">Grille — suivre les traits du tableau</option>
+              <option value="stream">Espaces — déduire les colonnes des blancs</option>
+              <option value="raw">Texte brut — une ligne du PDF par cellule</option>
+            </select>
+            <p class="pe-hint">En automatique, si le PDF dessine un vrai tableau, ses traits servent
+              directement de structure : c'est la reproduction la plus fidèle. Sinon les colonnes
+              sont déduites des espaces verticaux.</p>
+          </div>
+
+          <div class="pe-field">
+            <label class="pe-label" for="opt-sensitivity">Écart minimal entre colonnes</label>
+            <div class="pe-range-row">
+              <input type="range" id="opt-sensitivity" class="pe-range" min="3" max="40" step="1" value="8">
+              <span id="opt-sensitivity-val" class="pe-range-val">8 pt</span>
+            </div>
+            <p class="pe-hint">Diminuez si des colonnes sont fusionnées, augmentez si une colonne
+              est découpée en plusieurs.</p>
+          </div>
+
+          <div class="pe-field">
+            <label class="pe-label" for="opt-pages">Pages à convertir</label>
+            <input type="text" id="opt-pages" class="pe-input" placeholder="Toutes — ex. : 1-3, 5, 8-">
+          </div>
+
+          <div class="pe-field">
+            <label class="pe-label" for="opt-skip">Lignes à ignorer en haut de page</label>
+            <input type="number" id="opt-skip" class="pe-input" min="0" max="50" step="1" value="0">
+            <p class="pe-hint">Pour écarter un titre, un logo ou un en-tête de page répété
+              avant le début du tableau.</p>
+          </div>
+
+          <div class="pe-field">
+            <label class="pe-label">Mise en forme</label>
+            <label class="pe-check"><input type="checkbox" id="opt-layout" checked>
+              <span>Reproduire la mise en forme du PDF (bordures, gras, couleurs,
+                largeurs de colonnes)</span></label>
+            <label class="pe-check"><input type="checkbox" id="opt-header" checked>
+              <span>La première ligne contient les en-têtes</span></label>
+            <label class="pe-check"><input type="checkbox" id="opt-numbers" checked>
+              <span>Convertir les nombres (1 234,56 → valeur numérique)</span></label>
+            <label class="pe-check"><input type="checkbox" id="opt-empty-rows" checked>
+              <span>Supprimer les lignes vides</span></label>
+            <label class="pe-check"><input type="checkbox" id="opt-empty-cols" checked>
+              <span>Supprimer les colonnes vides</span></label>
+            <label class="pe-check"><input type="checkbox" id="opt-merge">
+              <span>Fusionner toutes les pages dans une seule feuille</span></label>
+          </div>
+
+          <button id="btn-convert" class="pe-btn pe-btn-accent pe-btn-block" disabled>
+            🔄 Relancer l'analyse
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= COLONNE DROITE : APERÇU ================= -->
+    <section>
+      <div id="alerts"></div>
+
+      <div class="pe-card">
+        <div class="pe-card-head">
+          <h2>3 · Aperçu du résultat</h2>
+        </div>
+
+        <div id="page-tabs" class="pe-tabs" style="display:none"></div>
+        <div id="preview-body"></div>
+
+        <div id="preview-foot" class="pe-preview-foot" style="display:none">
+          <span id="preview-stats" class="pe-stats"></span>
+          <span class="pe-foot-spacer"></span>
+          <button id="btn-csv" class="pe-btn pe-btn-ghost pe-btn-sm" disabled>⬇️ CSV</button>
+          <button id="btn-all" class="pe-btn pe-btn-ghost pe-btn-sm" disabled>📚 Tout convertir</button>
+          <button id="btn-xlsx" class="pe-btn pe-btn-primary" disabled>⬇️ Télécharger Excel (.xlsx)</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Bibliothèques hébergées avec la page (aucun CDN tiers) :
+       lecture PDF (pdf.js 3.11.174) + écriture Excel stylée (ExcelJS 4.4.0) -->
+  <script src="vendor/pdfjs/pdf.min.js"></script>
+  <script src="vendor/exceljs/exceljs.min.js"></script>
+  <script src="js/pdf-excel.js"></script>
+</body>
+</html>
