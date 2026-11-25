@@ -3,6 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Sécurité : la page ne charge que ses propres fichiers et ne peut ouvrir
+       aucune connexion réseau (connect-src 'none') : les PDF restent sur l'appareil. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <title>Convertisseur PDF → Excel</title>
   <meta name="description" content="Convertissez vos PDF en fichiers Excel (.xlsx) directement dans votre navigateur. Aucun fichier n'est envoyé sur Internet.">
   <link rel="stylesheet" href="css/pdf-excel.css">
@@ -31,7 +35,7 @@
                aria-label="Déposer ou choisir des fichiers PDF">
             <div class="pe-drop-icon">📥</div>
             <div class="pe-drop-title">Déposez vos PDF ici</div>
-            <div class="pe-drop-sub">ou cliquez pour parcourir · plusieurs fichiers acceptés</div>
+            <div class="pe-drop-sub">ou cliquez pour parcourir · plusieurs fichiers acceptés · 50 Mo max par fichier</div>
             <input type="file" id="file-input" accept="application/pdf,.pdf" multiple>
           </div>
 
@@ -130,9 +134,10 @@
     </section>
   </main>
 
-  <!-- Bibliothèques : lecture PDF (pdf.js) + écriture Excel stylée (ExcelJS) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+  <!-- Bibliothèques hébergées avec la page (aucun CDN tiers) :
+       lecture PDF (pdf.js 3.11.174) + écriture Excel stylée (ExcelJS 4.4.0) -->
+  <script src="vendor/pdfjs/pdf.min.js"></script>
+  <script src="vendor/exceljs/exceljs.min.js"></script>
   <script src="js/pdf-excel.js"></script>
 </body>
 </html>

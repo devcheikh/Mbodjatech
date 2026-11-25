@@ -22,8 +22,12 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  // Worker servi depuis le même domaine que la page : aucun appel à un CDN tiers.
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js';
+
+  var MAX_FILE_SIZE = 50 * 1024 * 1024;  // 50 Mo par fichier
+  var MAX_FILES = 20;                     // fichiers dans la liste
+  var MAX_PAGES = 1000;                   // garde-fou contre les PDF piégés
 
   var MAX_PREVIEW_ROWS = 300;   // lignes affichées dans l'aperçu
   var MAX_COLUMNS = 60;         // garde-fou sur la détection de colonnes
@@ -37,7 +41,8 @@
     files: [],        // { id, file, name, size, result, error, status }
     activeId: null,
     activePage: 0,
-    busy: false
+    busy: false,
+    notice: null      // avertissement à afficher au prochain lancement
   };
 
   var el = {};
@@ -58,6 +63,28 @@
     if (bytes < 1024) return bytes + ' o';
     if (bytes < 1048576) return (bytes / 1024).toFixed(0) + ' Ko';
     return (bytes / 1048576).toFixed(1) + ' Mo';
+  }
+
+  /**
+   * Vérifie la signature d'un PDF : « %PDF- » doit apparaître dans les
+   * 1024 premiers octets (tolérance prévue par la norme). L'extension et le
+   * type MIME annoncés par le navigateur ne suffisent pas, ils se falsifient.
+   */
+  function hasPdfSignature(bytes) {
+    var end = Math.min(bytes.length - 4, 1024);
+    for (var i = 0; i < end; i++) {
+      if (bytes[i] === 0x25 && bytes[i + 1] === 0x50 && bytes[i + 2] === 0x44 &&
+          bytes[i + 3] === 0x46 && bytes[i + 4] === 0x2D) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Neutralise l'injection de formule dans le CSV : une cellule qui commence
+   * par = + - @ ou une tabulation serait exécutée par Excel comme une formule.
+   */
+  function csvSafeText(t) {
+    return /^[=+\-@\t\r]/.test(t) ? "'" + t : t;
   }
 
   function baseName(name) {
@@ -841,9 +868,19 @@
   // ================================================================
 
   function extractDocument(arrayBuffer, opts, onProgress) {
+    var bytes = new Uint8Array(arrayBuffer);
+    if (!hasPdfSignature(bytes)) {
+      var notPdf = new Error('ce fichier n\'est pas un PDF (signature %PDF absente).');
+      notPdf.name = 'InvalidPDFException';
+      return Promise.reject(notPdf);
+    }
+
     var task = pdfjsLib.getDocument({
-      data: new Uint8Array(arrayBuffer),
-      isEvalSupported: false
+      data: bytes,
+      isEvalSupported: false,   // bloque l'exécution de code via les polices (CVE-2024-4367)
+      enableXfa: false,
+      disableFontFace: true,    // aucune police du PDF n'est chargée dans la page
+      useSystemFonts: false
     });
 
     task.onPassword = function (updatePassword, reason) {
@@ -856,6 +893,9 @@
     };
 
     return task.promise.then(function (pdf) {
+      if (pdf.numPages > MAX_PAGES) {
+        throw new Error('ce PDF compte ' + pdf.numPages + ' pages, la limite est de ' + MAX_PAGES + '.');
+      }
       var allowed = parsePageRange(opts.pageRange, pdf.numPages);
       var pages = [];
       var totalFrags = 0;
@@ -1150,9 +1190,22 @@
 
   function addFiles(fileList) {
     var added = 0;
+    var rejected = [];
     for (var i = 0; i < fileList.length; i++) {
       var f = fileList[i];
-      if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') continue;
+      if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') {
+        rejected.push(f.name + ' (pas un PDF)');
+        continue;
+      }
+      if (f.size === 0) { rejected.push(f.name + ' (fichier vide)'); continue; }
+      if (f.size > MAX_FILE_SIZE) {
+        rejected.push(f.name + ' (trop volumineux : ' + MAX_FILE_SIZE / 1048576 + ' Mo maximum)');
+        continue;
+      }
+      if (state.files.length >= MAX_FILES) {
+        rejected.push(f.name + ' (limite de ' + MAX_FILES + ' fichiers atteinte)');
+        continue;
+      }
       state.files.push({
         id: 'f' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
         file: f, name: f.name, size: f.size,
@@ -1160,11 +1213,15 @@
       });
       added++;
     }
+    var rejectedMsg = rejected.length
+      ? 'Fichier(s) ignoré(s) : ' + rejected.map(escapeHtml).join(', ') + '.'
+      : '';
     if (!added) {
-      showAlert('error', 'Aucun fichier PDF valide. Sélectionnez des fichiers .pdf.');
+      showAlert('error', rejectedMsg || 'Aucun fichier PDF valide. Sélectionnez des fichiers .pdf.');
       return;
     }
-    clearAlert();
+    // Affiché par convertActive(), qui réinitialise les messages au démarrage.
+    state.notice = rejectedMsg || null;
     state.activeId = state.files[state.files.length - added].id;
     state.activePage = 0;
     renderFiles();
@@ -1216,7 +1273,8 @@
 
     var opts = readOptions();
     setBusy(true);
-    clearAlert();
+    if (state.notice) { showAlert('warn', state.notice); state.notice = null; }
+    else clearAlert();
     showProgress(true, 'Lecture du fichier…', 0.02);
 
     entry.file.arrayBuffer()
@@ -1416,7 +1474,7 @@
         if (num) {
           cells.push(String(num.v).replace('.', ','));
         } else {
-          var t = text || '';
+          var t = csvSafeText(text || '');
           if (/[";\r\n]/.test(t)) t = '"' + t.replace(/"/g, '""') + '"';
           cells.push(t);
         }
