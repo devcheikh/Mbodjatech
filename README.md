@@ -1,5 +1,7 @@
 # Mbodjatech
 
+Scripts et outils internes.
+
 ## Convertisseur PDF → Excel (`src/`)
 
 Page statique qui convertit des PDF en classeurs Excel (.xlsx) ou CSV,
